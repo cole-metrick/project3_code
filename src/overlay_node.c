@@ -87,12 +87,11 @@ void forward_data(struct data_pkt *pkt) {
     }
     
     //update path info
-    int path_len = 0;
-    path_len = pkt->hdr.path_len;
+    int path_len = pkt->hdr.path_len;
     if (path_len < MAX_PATH)
     {
         pkt->hdr.path[path_len] = My_ID;
-        pkt->hdr.path_len++;
+        pkt->hdr.path_len += path_len;
     }
     
     //send packet to hop
