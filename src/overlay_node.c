@@ -326,6 +326,8 @@ void handle_dv(struct dv_pkt *pkt)
 }
 
 void dead_link(int neighbor, void *unused) {
+    Alarm(PRINT, "Marked link to %d as dead\n", neighbor);
+
     //mark neighbor as inactive
     active[neighbor] = 0;
 
@@ -778,9 +780,6 @@ void send_heartbeat(int neighbor_id, void *unused) {
 
     node = get_node_from_id(&Node_List, neighbor_id);
 
-    // struct sockaddr_in ctrl_addr_ex = node->ctrl_addr;
-    // ctrl_addr_ex.sin_port = htons(ntohs(node->ctrl_addr.sin_port) + 1);
-
     ret = sendto(Ctrl_Sock, &heartPkt, sizeof(heartPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
     {
@@ -889,7 +888,7 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
             }
         }
         
-        Alarm(PRINT, "hi\n");
+        // Alarm(PRINT, "hi\n");
         if (update == 1)
         {
             updateNum++;
@@ -934,11 +933,8 @@ void send_link_state(int neighbor_id, int update, int firstSend, int src, int me
         }
     }
 
-    struct sockaddr_in ctrl_addr_ex = neighbor->ctrl_addr;
-    ctrl_addr_ex.sin_port = htons(ntohs(neighbor->ctrl_addr.sin_port) + 1);
-
     bytes = sizeof(lsaPkt);
-    ret = sendto(Ctrl_Sock, &lsaPkt,bytes, 0, (struct sockaddr *)&ctrl_addr_ex, sizeof(ctrl_addr_ex));
+    ret = sendto(Ctrl_Sock, &lsaPkt,bytes, 0, (struct sockaddr *)&neighbor->ctrl_addr, sizeof(neighbor->ctrl_addr));
     if (ret < 0)
     {
         Alarm(PRINT, "Error sending link state advertisement to sock %d\n", Ctrl_Sock);
