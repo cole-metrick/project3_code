@@ -52,22 +52,24 @@ static int Client_Sock = -1;
 static int Ctrl_Sock = -1;
 static int Data_Sock = -1;
 
+//initializing needed variables
 int active[MAX_NODES];
 int edges[MAX_NODES][MAX_NODES];
 int updates[MAX_NODES];
 int updateNum = 1;
 int fwdingTable[MAX_NODES];
-static const sp_time Timeout_Timer = {10, 0};
+static const sp_time heartbeat_timer = {10, 0};
 static const sp_time Data_Timer = {1, 0};
 
+
+//initializing helper methids
 void dead_link(int neighbor, void *unused);
 void send_heartbeat(int neighbor_id, void *unused);
 void dijkstras(int startingId, int forward, int update, int src, int updateNum, int updates[MAX_NODES]);
 void send_link_state(int neighbor_id, int update, int firstSend, int src, int messageUpdNum, int updates[MAX_NODES]);
 
 /* Forward the packet to the next-hop node based on forwarding table */
-void forward_data(struct data_pkt *pkt)
-{
+void forward_data(struct data_pkt *pkt) {
     Alarm(DEBUG, "overlay_node: forwarding data to overlay node %u, client port "
                  "%u\n",
           pkt->hdr.dst_id, pkt->hdr.dst_port);
@@ -75,27 +77,27 @@ void forward_data(struct data_pkt *pkt)
      * Students fill in! Do forwarding table lookup, update path information in
      * header (see deliver_locally for an example), and send packet to next hop
      * */
-
-    int path_len = 0;
-    int ret = -1;
-
-    int dstID = pkt->hdr.dst_id;
-    int hopID = fwdingTable[dstID];
+    
+    //forwarding table lookup
+    int hopID = fwdingTable[pkt->hdr.dst_id];
     if (hopID == INT_MAX)
     {
         Alarm(PRINT, "sending to inactive node");
         return;
     }
-    struct node *node = get_node_from_id(&Node_List, hopID);
-
+    
+    //update path info
+    int path_len = 0;
     path_len = pkt->hdr.path_len;
     if (path_len < MAX_PATH)
     {
         pkt->hdr.path[path_len] = My_ID;
         pkt->hdr.path_len++;
     }
-
-    ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
+    
+    //send packet to hop
+    struct node *node = get_node_from_id(&Node_List, hopID);
+    int ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
     if (ret < 0)
     {
         Alarm(PRINT, "Error forwarding data");
@@ -195,8 +197,7 @@ void handle_overlay_data(int sock, int code, void *data)
 }
 
 /* Respond to heartbeat message by sending heartbeat echo */
-void handle_heartbeat(struct heartbeat_pkt *pkt)
-{
+void handle_heartbeat(struct heartbeat_pkt *pkt) {
     if (pkt->hdr.type != CTRL_HEARTBEAT)
     {
         Alarm(PRINT, "Error: non-heartbeat msg in handle_heartbeat\n");
@@ -206,15 +207,15 @@ void handle_heartbeat(struct heartbeat_pkt *pkt)
     Alarm(DEBUG, "Got heartbeat from %d\n", pkt->hdr.src_id);
 
     /* Students fill in! */
+
+    //create heartbeat message
     struct heartbeat_echo_pkt echoPkt;
     echoPkt.hdr.type = CTRL_HEARTBEAT_ECHO;
     echoPkt.hdr.src_id = My_ID;
     echoPkt.hdr.dst_id = pkt->hdr.src_id;
 
+    //send heartbeat
     struct node *node = get_node_from_id(&Node_List, pkt->hdr.src_id);
-
-    // node->addr.sin_port = htons(ntohs(n->addr.sin_port)+1);
-
     int ret = sendto(Ctrl_Sock, &echoPkt, sizeof(echoPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
     {
@@ -240,17 +241,21 @@ void handle_heartbeat_echo(struct heartbeat_echo_pkt *pkt)
     Alarm(DEBUG, "Got heartbeat_echo from %d\n", pkt->hdr.src_id);
 
     /* Students fill in! */
+
+    //update the active status of the source
     int activeStatus = active[pkt->hdr.src_id];
     active[pkt->hdr.src_id] = 1;
 
+    //if it was thought to be inactive
     if (activeStatus == 0)
     {
         if (Route_Mode == MODE_LINK_STATE)
         {
+            //mark edges as active and update the dijkstras
             edges[My_ID][pkt->hdr.src_id] = 1;
             edges[pkt->hdr.src_id][My_ID] = 1;
             
-            Alarm(PRINT, "got to dijkstras echo\n");
+            // Alarm(PRINT, "got to dijkstras echo\n");
             dijkstras(My_ID, 1, 1, 0, 0, updates);
         }
         else
@@ -259,7 +264,8 @@ void handle_heartbeat_echo(struct heartbeat_echo_pkt *pkt)
         }
     }
 
-    E_queue(dead_link, pkt->hdr.src_id, &My_ID, Timeout_Timer);
+    //start a heartbeat timer
+    E_queue(dead_link, pkt->hdr.src_id, &My_ID, heartbeat_timer);
 }
 
 /* Process received link state advertisement */
@@ -279,6 +285,8 @@ void handle_lsa(struct lsa_pkt *pkt)
     Alarm(DEBUG, "Got lsa from %d\n", pkt->hdr.src_id);
 
     /* Students fill in! */
+
+    //flood if new update
     if (updates[pkt->hdr.src_id] < pkt->updateNum)
     {
         updates[pkt->hdr.src_id] = pkt->updateNum;
@@ -292,7 +300,7 @@ void handle_lsa(struct lsa_pkt *pkt)
             }
         }
 
-        Alarm(PRINT, "got to dijkstras lsa\n");
+        // Alarm(PRINT, "got to dijkstras lsa\n");
         dijkstras(My_ID, 1, 0, pkt->hdr.src_id, pkt->updateNum, pkt->updateRow);
     }
 }
@@ -317,20 +325,19 @@ void handle_dv(struct dv_pkt *pkt)
     /* Students fill in! */
 }
 
-void dead_link(int neighbor, void *unused)
-{
+void dead_link(int neighbor, void *unused) {
+    //mark neighbor as inactive
     active[neighbor] = 0;
 
     if (Route_Mode == MODE_LINK_STATE)
     {
+        //mark edges as inactive and update dijkstras
         edges[My_ID][neighbor] = 0;
         edges[neighbor][My_ID] = 0;
 
-        Alarm(PRINT, "Got to dijkstras dead_link \n");
+        // Alarm(PRINT, "Got to dijkstras dead_link \n");
         dijkstras(My_ID, 1, 1, 0, 0, updates);
-    }
-    else
-    {
+    } else {
         // distance vector
     }
 }
@@ -732,6 +739,7 @@ void init_link_state(void)
 {
     Alarm(DEBUG, "init link state\n");
 
+    // init arrays
     for (int i = 0; i < MAX_NODES; i++)
     {
         updates[i] = 0;
@@ -742,7 +750,7 @@ void init_link_state(void)
         }
     }
 
-    Alarm(PRINT, "got to dijkstras init\n");
+    // Alarm(PRINT, "got to dijkstras init\n");
     dijkstras(My_ID, 0, 0, 0, 0, updates);
 
     void *unused = NULL;
@@ -754,13 +762,12 @@ void init_link_state(void)
         if (srcID == My_ID)
         {
             send_heartbeat(dstID, unused);
-            E_queue(dead_link, dstID, &My_ID, Timeout_Timer);
+            E_queue(dead_link, dstID, &My_ID, heartbeat_timer);
         }
     }
 }
 
-void send_heartbeat(int neighbor_id, void *unused)
-{
+void send_heartbeat(int neighbor_id, void *unused) {
     
     struct heartbeat_pkt heartPkt;
     struct node *node;
@@ -792,45 +799,44 @@ err:
 
 void dijkstras(int startingId, int forward, int update, int messageSrc, int messageUpdateNum, int updates[MAX_NODES])
 {
-    Alarm(PRINT, "in dijkstras\n");
-    int nodeCount = Node_List.num_nodes;
-    int edgeCount = Edge_List.num_edges;
+    // Alarm(PRINT, "in dijkstras\n");
     int visitedCount = 0;
-
+    
     int visited[MAX_NODES];
     int distance[MAX_NODES];
-
+    
     for (int i = 0; i < MAX_NODES; i++)
     {
         visited[i] = 0;
         distance[i] = INT_MAX;
-        Alarm(PRINT, "hi\n");
-        Alarm(PRINT, "Num nodes %d\n", Node_List.num_nodes);
+        // Alarm(PRINT, "hi\n");
+        // Alarm(PRINT, "Num nodes %d\n", Node_List.num_nodes);
         fwdingTable[i] = INT_MAX;
-        Alarm(PRINT, "hi2\n");
+        // Alarm(PRINT, "hi2\n");
     }
-
+    
     visited[startingId] = 1;
     distance[startingId] = 0;
     fwdingTable[startingId] = startingId;
     visitedCount++;
-
+    
+    int nodeCount = Node_List.num_nodes;
+    int edgeCount = Edge_List.num_edges;
     while (visitedCount < nodeCount)
     {
-        // loop through edges
         for (int i = 0; i < edgeCount; i++)
         {
             int srcEdgeId = Edge_List.edges[i]->src_id;
             int dstEdgeId = Edge_List.edges[i]->dst_id;
             int edgeCost = Edge_List.edges[i]->cost;
-            // if edge's src is visited
+            
             int visitable = (visited[srcEdgeId] == 1) && (visited[dstEdgeId] == 0);
             int available = edges[srcEdgeId][dstEdgeId];
-            // need to check for each node can be reached
+            
             if (visitable && available)
             {
                 int pathCost = distance[srcEdgeId] + edgeCost;
-                // if found shorter distance to a node
+                
                 if (distance[dstEdgeId] > pathCost)
                 {
                     distance[dstEdgeId] = pathCost;
@@ -845,7 +851,7 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
                 }
             }
         }
-        // find shortest path
+        
         int currShortest = INT_MAX;
         int currShortestIndex = -1;
         for (int i = 0; i < MAX_NODES; i++)
@@ -870,19 +876,19 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
             {
                 if (update == 1)
                 {
-                    // first send, disregard origin
-                    Alarm(PRINT, "got to sendlinkstate 1\n");
+                    
+                    // Alarm(PRINT, "got to sendlinkstate 1\n");
                     send_link_state(dstEdgeId, updateNum, 1, 0, 0, updates);
                 }
                 else
                 {
-                    // else, forwarding from message origin, include message origin
-                    Alarm(PRINT, "got to sendlinkstate 2\n");
+                    
+                    // Alarm(PRINT, "got to sendlinkstate 2\n");
                     send_link_state(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
                 }
             }
         }
-        // do this after because want to send to all neighbors, but only want to increment once
+        
         Alarm(PRINT, "hi\n");
         if (update == 1)
         {
@@ -904,9 +910,7 @@ void send_link_state(int neighbor_id, int update, int firstSend, int src, int me
 
     neighbor = get_node_from_id(&Node_List, neighbor_id);
 
-    // first time advertisement sent
-    if (firstSend == 1)
-    {
+    if (firstSend == 1) {
         lsaPkt.hdr.src_id = My_ID;
         lsaPkt.updateNum = update;
         for (int i = 0; i < MAX_NODES; i++)
@@ -930,9 +934,6 @@ void send_link_state(int neighbor_id, int update, int firstSend, int src, int me
         }
     }
 
-    // get the sockaddr of control socket
-    // couldn't add as struct field
-    // adding anything as struct field causes wierd problems where data structure contents are overwritten
     struct sockaddr_in ctrl_addr_ex = neighbor->ctrl_addr;
     ctrl_addr_ex.sin_port = htons(ntohs(neighbor->ctrl_addr.sin_port) + 1);
 
