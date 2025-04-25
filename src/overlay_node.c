@@ -56,6 +56,7 @@ int active[MAX_NODES];
 int edges[MAX_NODES][MAX_NODES];
 int updates[MAX_NODES];
 int updateNum = 1;
+int fwdingTable[MAX_NODES];
 static const sp_time Timeout_Timer = {10, 0};
 static const sp_time Data_Timer = {1, 0};
 
@@ -75,31 +76,31 @@ void forward_data(struct data_pkt *pkt)
      * header (see deliver_locally for an example), and send packet to next hop
      * */
 
-    // int path_len = 0;
-    // int ret = -1;
+    int path_len = 0;
+    int ret = -1;
 
-    // int dstID = pkt->hdr.dst_id;
-    // int hopID = Node_List.nodes[dstID]->next_hop->id;
-    // if (hopID == INT_MAX)
-    // {
-    //     Alarm(PRINT, "sending to inactive node");
-    //     return;
-    // }
-    // struct node *node = get_node_from_id(&Node_List, hopID);
+    int dstID = pkt->hdr.dst_id;
+    int hopID = fwdingTable[dstID];
+    if (hopID == INT_MAX)
+    {
+        Alarm(PRINT, "sending to inactive node");
+        return;
+    }
+    struct node *node = get_node_from_id(&Node_List, hopID);
 
-    // path_len = pkt->hdr.path_len;
-    // if (path_len < MAX_PATH)
-    // {
-    //     pkt->hdr.path[path_len] = My_ID;
-    //     pkt->hdr.path_len++;
-    // }
+    path_len = pkt->hdr.path_len;
+    if (path_len < MAX_PATH)
+    {
+        pkt->hdr.path[path_len] = My_ID;
+        pkt->hdr.path_len++;
+    }
 
-    // ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
-    // if (ret < 0)
-    // {
-    //     Alarm(PRINT, "Error forwarding data");
-    //     remove_client_with_sock(&Client_List, Ctrl_Sock);
-    // }
+    ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
+    if (ret < 0)
+    {
+        Alarm(PRINT, "Error forwarding data");
+        remove_client_with_sock(&Client_List, Ctrl_Sock);
+    }
 }
 
 /* Deliver packet to one of my local clients */
@@ -250,7 +251,7 @@ void handle_heartbeat_echo(struct heartbeat_echo_pkt *pkt)
             edges[pkt->hdr.src_id][My_ID] = 1;
             
             Alarm(PRINT, "got to dijkstras echo\n");
-            // dijkstras(My_ID, 1, 1, 0, 0, updates);
+            dijkstras(My_ID, 1, 1, 0, 0, updates);
         }
         else
         {
@@ -278,21 +279,22 @@ void handle_lsa(struct lsa_pkt *pkt)
     Alarm(DEBUG, "Got lsa from %d\n", pkt->hdr.src_id);
 
     /* Students fill in! */
-    // if (updates[pkt->hdr.src_id] < pkt->updateNum)
-    // {
-    //     updates[pkt->hdr.src_id] = pkt->updateNum;
-    //     for (int i = 0; i < MAX_NODES; i++)
-    //     {
-    //         edges[pkt->hdr.src_id][i] = pkt->updateRow[i];
-    //         edges[i][pkt->hdr.src_id] = pkt->updateRow[i];
-    //         if (pkt->updateRow[i] == 0)
-    //         {
-    //             updates[i] = 0;
-    //         }
-    //     }
+    if (updates[pkt->hdr.src_id] < pkt->updateNum)
+    {
+        updates[pkt->hdr.src_id] = pkt->updateNum;
+        for (int i = 0; i < MAX_NODES; i++)
+        {
+            edges[pkt->hdr.src_id][i] = pkt->updateRow[i];
+            edges[i][pkt->hdr.src_id] = pkt->updateRow[i];
+            if (pkt->updateRow[i] == 0)
+            {
+                updates[i] = 0;
+            }
+        }
 
-    //     dijkstras(My_ID, 1, 0, pkt->hdr.src_id, pkt->updateNum, pkt->updateRow);
-    // }
+        Alarm(PRINT, "got to dijkstras lsa\n");
+        dijkstras(My_ID, 1, 0, pkt->hdr.src_id, pkt->updateNum, pkt->updateRow);
+    }
 }
 
 /* Process received distance vector update */
@@ -325,7 +327,7 @@ void dead_link(int neighbor, void *unused)
         edges[neighbor][My_ID] = 0;
 
         Alarm(PRINT, "Got to dijkstras dead_link \n");
-        // dijkstras(My_ID, 1, 1, 0, 0, updates);
+        dijkstras(My_ID, 1, 1, 0, 0, updates);
     }
     else
     {
@@ -741,7 +743,7 @@ void init_link_state(void)
     }
 
     Alarm(PRINT, "got to dijkstras init\n");
-    // dijkstras(My_ID, 0, 0, 0, 0, updates);
+    dijkstras(My_ID, 0, 0, 0, 0, updates);
 
     void *unused = NULL;
     for (int i = 0; i < Edge_List.num_edges; i++)
@@ -769,10 +771,10 @@ void send_heartbeat(int neighbor_id, void *unused)
 
     node = get_node_from_id(&Node_List, neighbor_id);
 
-    struct sockaddr_in ctrl_addr_ex = node->ctrl_addr;
-    ctrl_addr_ex.sin_port = htons(ntohs(node->ctrl_addr.sin_port) + 1);
+    // struct sockaddr_in ctrl_addr_ex = node->ctrl_addr;
+    // ctrl_addr_ex.sin_port = htons(ntohs(node->ctrl_addr.sin_port) + 1);
 
-    ret = sendto(Ctrl_Sock, &heartPkt, sizeof(heartPkt), 0, (struct sockaddr *)&ctrl_addr_ex, sizeof(node->ctrl_addr));
+    ret = sendto(Ctrl_Sock, &heartPkt, sizeof(heartPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
     {
         Alarm(PRINT, "Error sending heartbeat to sock %d\n", Ctrl_Sock);
@@ -780,7 +782,7 @@ void send_heartbeat(int neighbor_id, void *unused)
     }
 
     // start timer to send a heartbeat packet every second
-    Alarm(PRINT, "sent heartbeat\n");
+    // Alarm(PRINT, "sent heartbeat\n");
     E_queue(send_heartbeat, neighbor_id, &heartPkt, Data_Timer);
 
     return;
@@ -788,156 +790,163 @@ err:
     remove_client_with_sock(&Client_List, Ctrl_Sock);
 }
 
-void dijkstras(int startingId, int forward, int update, int messageSrc, int messageUpdateNum, int updates[100])
+void dijkstras(int startingId, int forward, int update, int messageSrc, int messageUpdateNum, int updates[MAX_NODES])
 {
-    // int nodeCount = Node_List.num_nodes;
-    // int edgeCount = Edge_List.num_edges;
-    // int visitedCount = 0;
+    Alarm(PRINT, "in dijkstras\n");
+    int nodeCount = Node_List.num_nodes;
+    int edgeCount = Edge_List.num_edges;
+    int visitedCount = 0;
 
-    // int visited[MAX_NODES];
-    // int distance[MAX_NODES];
+    int visited[MAX_NODES];
+    int distance[MAX_NODES];
 
-    // for (int i = 0; i < MAX_NODES; i++)
-    // {
-    //     visited[i] = 0;
-    //     distance[i] = INT_MAX;
-    //     Node_List.nodes[i]->next_hop->id = INT_MAX;
-    // }
+    for (int i = 0; i < MAX_NODES; i++)
+    {
+        visited[i] = 0;
+        distance[i] = INT_MAX;
+        Alarm(PRINT, "hi\n");
+        Alarm(PRINT, "Num nodes %d\n", Node_List.num_nodes);
+        fwdingTable[i] = INT_MAX;
+        Alarm(PRINT, "hi2\n");
+    }
 
-    // visited[startingId] = 1;
-    // distance[startingId] = 0;
-    // Node_List.nodes[startingId]->next_hop->id = startingId;
-    // visitedCount++;
+    visited[startingId] = 1;
+    distance[startingId] = 0;
+    fwdingTable[startingId] = startingId;
+    visitedCount++;
 
-    // while (visitedCount < nodeCount)
-    // {
-    //     // loop through edges
-    //     for (int i = 0; i < edgeCount; i++)
-    //     {
-    //         int srcEdgeId = Edge_List.edges[i]->src_id;
-    //         int dstEdgeId = Edge_List.edges[i]->dst_id;
-    //         int edgeCost = Edge_List.edges[i]->cost;
-    //         // if edge's src is visited
-    //         int visitable = (visited[srcEdgeId] == 1) && (visited[dstEdgeId] == 0);
-    //         int available = edges[srcEdgeId][dstEdgeId];
-    //         // need to check for each node can be reached
-    //         if (visitable && available)
-    //         {
-    //             int pathCost = distance[srcEdgeId] + edgeCost;
-    //             // if found shorter distance to a node
-    //             if (distance[dstEdgeId] > pathCost)
-    //             {
-    //                 distance[dstEdgeId] = pathCost;
-    //                 if (srcEdgeId == startingId)
-    //                 {
-    //                     Node_List.nodes[dstEdgeId]->next_hop->id = dstEdgeId;
-    //                 }
-    //                 else
-    //                 {
-    //                     Node_List.nodes[dstEdgeId]->next_hop->id = Node_List.nodes[srcEdgeId]->next_hop->id;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     // find shortest path
-    //     int currShortest = INT_MAX;
-    //     int currShortestIndex = -1;
-    //     for (int i = 0; i < MAX_NODES; i++)
-    //     {
-    //         if ((distance[i] < currShortest) && (visited[i] == 0))
-    //         {
-    //             currShortest = distance[i];
-    //             currShortestIndex = i;
-    //         }
-    //     }
-    //     visited[currShortestIndex] = 1;
-    //     visitedCount++;
-    // }
+    while (visitedCount < nodeCount)
+    {
+        // loop through edges
+        for (int i = 0; i < edgeCount; i++)
+        {
+            int srcEdgeId = Edge_List.edges[i]->src_id;
+            int dstEdgeId = Edge_List.edges[i]->dst_id;
+            int edgeCost = Edge_List.edges[i]->cost;
+            // if edge's src is visited
+            int visitable = (visited[srcEdgeId] == 1) && (visited[dstEdgeId] == 0);
+            int available = edges[srcEdgeId][dstEdgeId];
+            // need to check for each node can be reached
+            if (visitable && available)
+            {
+                int pathCost = distance[srcEdgeId] + edgeCost;
+                // if found shorter distance to a node
+                if (distance[dstEdgeId] > pathCost)
+                {
+                    distance[dstEdgeId] = pathCost;
+                    if (srcEdgeId == startingId)
+                    {
+                        fwdingTable[dstEdgeId] = dstEdgeId;
+                    }
+                    else
+                    {
+                        fwdingTable[dstEdgeId] = fwdingTable[srcEdgeId];
+                    }
+                }
+            }
+        }
+        // find shortest path
+        int currShortest = INT_MAX;
+        int currShortestIndex = -1;
+        for (int i = 0; i < MAX_NODES; i++)
+        {
+            if ((distance[i] < currShortest) && (visited[i] == 0))
+            {
+                currShortest = distance[i];
+                currShortestIndex = i;
+            }
+        }
+        visited[currShortestIndex] = 1;
+        visitedCount++;
+    }
 
-    // if (forward == 1)
-    // {
-    //     for (int i = 0; i < Edge_List.num_edges; i++)
-    //     {
-    //         int srcEdgeId = Edge_List.edges[i]->src_id;
-    //         int dstEdgeId = Edge_List.edges[i]->dst_id;
-    //         if (srcEdgeId == My_ID && edges[srcEdgeId][dstEdgeId] == 1)
-    //         {
-    //             if (update == 1)
-    //             {
-    //                 // first send, disregard origin
-    //                 send_link_state(dstEdgeId, updateNum, 1, 0, 0, updates);
-    //             }
-    //             else
-    //             {
-    //                 // else, forwarding from message origin, include message origin
-    //                 send_link_state(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
-    //             }
-    //         }
-    //     }
-    //     // do this after because want to send to all neighbors, but only want to increment once
-    //     if (update == 1)
-    //     {
-    //         updateNum++;
-    //         updates[My_ID] = updateNum;
-    //     }
-    // }
+    if (forward == 1)
+    {
+        for (int i = 0; i < Edge_List.num_edges; i++)
+        {
+            int srcEdgeId = Edge_List.edges[i]->src_id;
+            int dstEdgeId = Edge_List.edges[i]->dst_id;
+            if (srcEdgeId == My_ID && edges[srcEdgeId][dstEdgeId] == 1)
+            {
+                if (update == 1)
+                {
+                    // first send, disregard origin
+                    Alarm(PRINT, "got to sendlinkstate 1\n");
+                    send_link_state(dstEdgeId, updateNum, 1, 0, 0, updates);
+                }
+                else
+                {
+                    // else, forwarding from message origin, include message origin
+                    Alarm(PRINT, "got to sendlinkstate 2\n");
+                    send_link_state(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
+                }
+            }
+        }
+        // do this after because want to send to all neighbors, but only want to increment once
+        Alarm(PRINT, "hi\n");
+        if (update == 1)
+        {
+            updateNum++;
+            updates[My_ID] = updateNum;
+        }
+    }
 }
 
 void send_link_state(int neighbor_id, int update, int firstSend, int src, int messageUpdNum, int updates[MAX_NODES])
 {
-//     struct lsa_pkt lsaPkt;
-//     struct node *neighbor;
-//     int bytes = 0;
-//     int ret = 0;
-//     lsaPkt.hdr.dst_id = neighbor_id;
-//     lsaPkt.hdr.src_id = My_ID;
-//     lsaPkt.hdr.type = CTRL_LSA;
+    struct lsa_pkt lsaPkt;
+    struct node *neighbor;
+    int bytes = 0;
+    int ret = 0;
+    lsaPkt.hdr.dst_id = neighbor_id;
+    lsaPkt.hdr.src_id = My_ID;
+    lsaPkt.hdr.type = CTRL_LSA;
 
-//     neighbor = get_node_from_id(&Node_List, neighbor_id);
+    neighbor = get_node_from_id(&Node_List, neighbor_id);
 
-//     // first time advertisement sent
-//     if (firstSend == 1)
-//     {
-//         lsaPkt.hdr.src_id = My_ID;
-//         lsaPkt.updateNum = update;
-//         for (int i = 0; i < MAX_NODES; i++)
-//         {
-//             lsaPkt.updateRow[i] = edges[My_ID][i];
-//             if (Node_List.nodes[i]->next_hop->id == neighbor_id)
-//             {
-//                 lsaPkt.updateRow[i] = edges[My_ID][i];
-//             }
-//         }
-//     } else {
-//         lsaPkt.hdr.src_id = src;
-//         lsaPkt.updateNum = messageUpdNum;
-//         for (int i = 0; i < MAX_NODES; i++)
-//         {
-//             lsaPkt.updateRow[i] = updates[i];
-//             if (Node_List.nodes[i]->next_hop->id == neighbor_id)
-//             {
-//                 lsaPkt.updateRow[i] = updates[i];
-//             }
-//         }
-//     }
+    // first time advertisement sent
+    if (firstSend == 1)
+    {
+        lsaPkt.hdr.src_id = My_ID;
+        lsaPkt.updateNum = update;
+        for (int i = 0; i < MAX_NODES; i++)
+        {
+            lsaPkt.updateRow[i] = edges[My_ID][i];
+            if (fwdingTable[i]== neighbor_id)
+            {
+                lsaPkt.updateRow[i] = edges[My_ID][i];
+            }
+        }
+    } else {
+        lsaPkt.hdr.src_id = src;
+        lsaPkt.updateNum = messageUpdNum;
+        for (int i = 0; i < MAX_NODES; i++)
+        {
+            lsaPkt.updateRow[i] = updates[i];
+            if (fwdingTable[i] == neighbor_id)
+            {
+                lsaPkt.updateRow[i] = updates[i];
+            }
+        }
+    }
 
-//     // get the sockaddr of control socket
-//     // couldn't add as struct field
-//     // adding anything as struct field causes wierd problems where data structure contents are overwritten
-//     struct sockaddr_in ctrl_addr_ex = neighbor->ctrl_addr;
-//     ctrl_addr_ex.sin_port = htons(ntohs(neighbor->ctrl_addr.sin_port) + 1);
+    // get the sockaddr of control socket
+    // couldn't add as struct field
+    // adding anything as struct field causes wierd problems where data structure contents are overwritten
+    struct sockaddr_in ctrl_addr_ex = neighbor->ctrl_addr;
+    ctrl_addr_ex.sin_port = htons(ntohs(neighbor->ctrl_addr.sin_port) + 1);
 
-//     bytes = sizeof(lsaPkt);
-//     ret = sendto(Ctrl_Sock, &lsaPkt,bytes, 0, (struct sockaddr *)&ctrl_addr_ex, sizeof(ctrl_addr_ex));
-//     if (ret < 0)
-//     {
-//         Alarm(PRINT, "Error sending link state advertisement to sock %d\n", Ctrl_Sock);
-//         goto err;
-//     }
+    bytes = sizeof(lsaPkt);
+    ret = sendto(Ctrl_Sock, &lsaPkt,bytes, 0, (struct sockaddr *)&ctrl_addr_ex, sizeof(ctrl_addr_ex));
+    if (ret < 0)
+    {
+        Alarm(PRINT, "Error sending link state advertisement to sock %d\n", Ctrl_Sock);
+        goto err;
+    }
 
-//     return;
-// err:
-//     remove_client_with_sock(&Client_List, Ctrl_Sock);
+    return;
+err:
+    remove_client_with_sock(&Client_List, Ctrl_Sock);
 }
 
 void init_distance_vector(void)
