@@ -1,7 +1,7 @@
 /*
  * CS 1652 Project 3
  * (c) Amy Babay, 2022
- * (c) <Student names here>
+ * (c) <Cole Metrick>
  *
  * Computer Science Department
  * University of Pittsburgh
@@ -79,8 +79,10 @@ void forward_data(struct data_pkt *pkt) {
      * */
     
     //forwarding table lookup
+    Alarm(PRINT, "forwarding data");
     int hopID = fwdingTable[pkt->hdr.dst_id];
-    if (hopID == INT_MAX)
+    struct node *node = get_node_from_id(&Node_List, hopID);
+    if (hopID == INT_MAX || node == NULL)
     {
         Alarm(PRINT, "sending to inactive node");
         return;
@@ -95,7 +97,6 @@ void forward_data(struct data_pkt *pkt) {
     }
     
     //send packet to hop
-    struct node *node = get_node_from_id(&Node_List, hopID);
     int ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
     if (ret < 0)
     {
@@ -215,6 +216,7 @@ void handle_heartbeat(struct heartbeat_pkt *pkt) {
 
     //send heartbeat
     struct node *node = get_node_from_id(&Node_List, pkt->hdr.src_id);
+    // Alarm(PRINT, "sending heartbeat echo");
     int ret = sendto(Ctrl_Sock, &echoPkt, sizeof(echoPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
     {
@@ -738,7 +740,7 @@ void init_client_sock(int client_port)
 
 void init_link_state(void)
 {
-    Alarm(DEBUG, "init link state\n");
+    Alarm(PRINT, "init link state\n");
 
     // init arrays
     for (int i = 0; i < MAX_NODES; i++)
@@ -787,7 +789,7 @@ void send_heartbeat(int neighbor_id, void *unused) {
     }
 
     // start timer to send a heartbeat packet every second
-    // Alarm(PRINT, "sent heartbeat\n");
+    Alarm(PRINT, "sent heartbeat\n");
     E_queue(send_heartbeat, neighbor_id, &heartPkt, Data_Timer);
 
     return;
