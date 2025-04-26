@@ -79,7 +79,7 @@ void forward_data(struct data_pkt *pkt) {
      * */
     
     //forwarding table lookup
-    Alarm(PRINT, "forwarding data");
+    Alarm(DEBUG, "forwarding data");
     int hopID = fwdingTable[pkt->hdr.dst_id];
     struct node *node = get_node_from_id(&Node_List, hopID);
     if (hopID == INT_MAX || node == NULL)
@@ -93,11 +93,12 @@ void forward_data(struct data_pkt *pkt) {
     if (path_len < MAX_PATH)
     {
         pkt->hdr.path[path_len] = My_ID;
-        pkt->hdr.path_len += path_len;
+        pkt->hdr.path_len++;
     }
     
     //send packet to hop
-    int ret = sendto(Data_Sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
+    int bytes = sizeof(struct data_pkt) - MAX_PAYLOAD_SIZE + pkt->hdr.data_len;
+    int ret = sendto(Data_Sock, pkt, bytes, 0, (struct sockaddr *)&node->data_addr, sizeof(node->data_addr));
     if (ret < 0)
     {
         Alarm(PRINT, "Error forwarding data");
@@ -216,7 +217,7 @@ void handle_heartbeat(struct heartbeat_pkt *pkt) {
 
     //send heartbeat
     struct node *node = get_node_from_id(&Node_List, pkt->hdr.src_id);
-    // Alarm(PRINT, "sending heartbeat echo");
+    Alarm(DEBUG, "sending heartbeat echo");
     int ret = sendto(Ctrl_Sock, &echoPkt, sizeof(echoPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
     {
@@ -256,7 +257,7 @@ void handle_heartbeat_echo(struct heartbeat_echo_pkt *pkt)
             edges[My_ID][pkt->hdr.src_id] = 1;
             edges[pkt->hdr.src_id][My_ID] = 1;
             
-            // Alarm(PRINT, "got to dijkstras echo\n");
+            Alarm(DEBUG, "got to dijkstras echo\n");
             dijkstras(My_ID, 1, 1, 0, 0, updates);
         }
         else
@@ -301,7 +302,7 @@ void handle_lsa(struct lsa_pkt *pkt)
             }
         }
 
-        // Alarm(PRINT, "got to dijkstras lsa\n");
+        Alarm(DEBUG, "got to dijkstras lsa\n");
         dijkstras(My_ID, 1, 0, pkt->hdr.src_id, pkt->updateNum, pkt->updateRow);
     }
 }
@@ -327,7 +328,7 @@ void handle_dv(struct dv_pkt *pkt)
 }
 
 void dead_link(int neighbor, void *unused) {
-    Alarm(PRINT, "Marked link to %d as dead\n", neighbor);
+    Alarm(DEBUG, "Marked link to %d as dead\n", neighbor);
 
     //mark neighbor as inactive
     active[neighbor] = 0;
@@ -338,7 +339,7 @@ void dead_link(int neighbor, void *unused) {
         edges[My_ID][neighbor] = 0;
         edges[neighbor][My_ID] = 0;
 
-        // Alarm(PRINT, "Got to dijkstras dead_link \n");
+        Alarm(DEBUG, "Got to dijkstras dead_link \n");
         dijkstras(My_ID, 1, 1, 0, 0, updates);
     } else {
         // distance vector
@@ -740,7 +741,7 @@ void init_client_sock(int client_port)
 
 void init_link_state(void)
 {
-    Alarm(PRINT, "init link state\n");
+    Alarm(DEBUG, "init link state\n");
 
     // init arrays
     for (int i = 0; i < MAX_NODES; i++)
@@ -753,7 +754,7 @@ void init_link_state(void)
         }
     }
 
-    // Alarm(PRINT, "got to dijkstras init\n");
+    Alarm(DEBUG, "got to dijkstras init\n");
     dijkstras(My_ID, 0, 0, 0, 0, updates);
 
     void *unused = NULL;
@@ -789,7 +790,7 @@ void send_heartbeat(int neighbor_id, void *unused) {
     }
 
     // start timer to send a heartbeat packet every second
-    Alarm(PRINT, "sent heartbeat\n");
+    Alarm(DEBUG, "sent heartbeat\n");
     E_queue(send_heartbeat, neighbor_id, &heartPkt, Data_Timer);
 
     return;
@@ -799,7 +800,7 @@ err:
 
 void dijkstras(int startingId, int forward, int update, int messageSrc, int messageUpdateNum, int updates[MAX_NODES])
 {
-    // Alarm(PRINT, "in dijkstras\n");
+    Alarm(DEBUG, "in dijkstras\n");
     int visitedCount = 0;
     
     int visited[MAX_NODES];
@@ -809,10 +810,10 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
     {
         visited[i] = 0;
         distance[i] = INT_MAX;
-        // Alarm(PRINT, "hi\n");
-        // Alarm(PRINT, "Num nodes %d\n", Node_List.num_nodes);
+        Alarm(DEBUG, "hi\n");
+        Alarm(DEBUG, "Num nodes %d\n", Node_List.num_nodes);
         fwdingTable[i] = INT_MAX;
-        // Alarm(PRINT, "hi2\n");
+        Alarm(DEBUG, "hi2\n");
     }
     
     visited[startingId] = 1;
@@ -877,13 +878,13 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
                 if (update == 1)
                 {
                     
-                    // Alarm(PRINT, "got to sendlinkstate 1\n");
+                    Alarm(DEBUG, "got to sendlinkstate 1\n");
                     send_link_state(dstEdgeId, updateNum, 1, 0, 0, updates);
                 }
                 else
                 {
                     
-                    // Alarm(PRINT, "got to sendlinkstate 2\n");
+                    Alarm(DEBUG, "got to sendlinkstate 2\n");
                     send_link_state(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
                 }
             }
