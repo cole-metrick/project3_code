@@ -64,9 +64,9 @@ static const sp_time Data_Timer = {1, 0};
 
 //initializing helper methids
 void dead_link(int neighbor, void *unused);
-void send_heartbeat(int neighbor_id, void *unused);
+void send_heartbeat(int dstID, void *unused);
 void dijkstras(int startingId, int forward, int update, int src, int updateNum, int updates[MAX_NODES]);
-void send_link_state(int neighbor_id, int update, int firstSend, int src, int messageUpdNum, int updates[MAX_NODES]);
+void send_lsa(int dstID, int update, int firstSend, int src, int messageUpdateNum, int updates[MAX_NODES]);
 
 /* Forward the packet to the next-hop node based on forwarding table */
 void forward_data(struct data_pkt *pkt) {
@@ -209,13 +209,13 @@ void handle_heartbeat(struct heartbeat_pkt *pkt) {
 
     /* Students fill in! */
 
-    //create heartbeat message
+    //create heartbeat echo
     struct heartbeat_echo_pkt echoPkt;
     echoPkt.hdr.type = CTRL_HEARTBEAT_ECHO;
     echoPkt.hdr.src_id = My_ID;
     echoPkt.hdr.dst_id = pkt->hdr.src_id;
 
-    //send heartbeat
+    //send heartbeat echo
     struct node *node = get_node_from_id(&Node_List, pkt->hdr.src_id);
     Alarm(DEBUG, "sending heartbeat echo");
     int ret = sendto(Ctrl_Sock, &echoPkt, sizeof(echoPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
@@ -327,17 +327,17 @@ void handle_dv(struct dv_pkt *pkt)
     /* Students fill in! */
 }
 
-void dead_link(int neighbor, void *unused) {
-    Alarm(DEBUG, "Marked link to %d as dead\n", neighbor);
+void dead_link(int dst, void *unused) {
+    Alarm(DEBUG, "Marked link to %d as dead\n", dst);
 
     //mark neighbor as inactive
-    active[neighbor] = 0;
+    active[dst] = 0;
 
     if (Route_Mode == MODE_LINK_STATE)
     {
         //mark edges as inactive and update dijkstras
-        edges[My_ID][neighbor] = 0;
-        edges[neighbor][My_ID] = 0;
+        edges[My_ID][dst] = 0;
+        edges[dst][My_ID] = 0;
 
         Alarm(DEBUG, "Got to dijkstras dead_link \n");
         dijkstras(My_ID, 1, 1, 0, 0, updates);
@@ -771,16 +771,16 @@ void init_link_state(void)
     }
 }
 
-void send_heartbeat(int neighbor_id, void *unused) {
+void send_heartbeat(int dstID, void *unused) {
     
     struct heartbeat_pkt heartPkt;
     struct node *node;
     int ret = 0;
-    heartPkt.hdr.dst_id = neighbor_id;
+    heartPkt.hdr.dst_id = dstID;
     heartPkt.hdr.src_id = My_ID;
     heartPkt.hdr.type = CTRL_HEARTBEAT;
 
-    node = get_node_from_id(&Node_List, neighbor_id);
+    node = get_node_from_id(&Node_List, dstID);
 
     ret = sendto(Ctrl_Sock, &heartPkt, sizeof(heartPkt), 0, (struct sockaddr *)&node->ctrl_addr, sizeof(node->ctrl_addr));
     if (ret < 0)
@@ -791,18 +791,18 @@ void send_heartbeat(int neighbor_id, void *unused) {
 
     // start timer to send a heartbeat packet every second
     Alarm(DEBUG, "sent heartbeat\n");
-    E_queue(send_heartbeat, neighbor_id, &heartPkt, Data_Timer);
+    E_queue(send_heartbeat, dstID, &heartPkt, Data_Timer);
 
     return;
 err:
     remove_client_with_sock(&Client_List, Ctrl_Sock);
 }
 
+//I used a combination of course slides and the textbook along with the geeks for geeks implementation of dijkstras for this
 void dijkstras(int startingId, int forward, int update, int messageSrc, int messageUpdateNum, int updates[MAX_NODES])
 {
     Alarm(DEBUG, "in dijkstras\n");
     int visitedCount = 0;
-    
     int visited[MAX_NODES];
     int distance[MAX_NODES];
     
@@ -823,10 +823,8 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
     
     int nodeCount = Node_List.num_nodes;
     int edgeCount = Edge_List.num_edges;
-    while (visitedCount < nodeCount)
-    {
-        for (int i = 0; i < edgeCount; i++)
-        {
+    while (visitedCount < nodeCount) {
+        for (int i = 0; i < edgeCount; i++) {
             int srcEdgeId = Edge_List.edges[i]->src_id;
             int dstEdgeId = Edge_List.edges[i]->dst_id;
             int edgeCost = Edge_List.edges[i]->cost;
@@ -879,13 +877,13 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
                 {
                     
                     Alarm(DEBUG, "got to sendlinkstate 1\n");
-                    send_link_state(dstEdgeId, updateNum, 1, 0, 0, updates);
+                    send_lsa(dstEdgeId, updateNum, 1, 0, 0, updates);
                 }
                 else
                 {
                     
                     Alarm(DEBUG, "got to sendlinkstate 2\n");
-                    send_link_state(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
+                    send_lsa(dstEdgeId, updateNum, 0, messageSrc, messageUpdateNum, updates);
                 }
             }
         }
@@ -899,36 +897,38 @@ void dijkstras(int startingId, int forward, int update, int messageSrc, int mess
     }
 }
 
-void send_link_state(int neighbor_id, int update, int firstSend, int src, int messageUpdNum, int updates[MAX_NODES])
+void send_lsa(int dstID, int update, int firstSend, int src, int messageUpdateNum, int updates[MAX_NODES])
 {
     struct lsa_pkt lsaPkt;
     struct node *neighbor;
     int bytes = 0;
     int ret = 0;
-    lsaPkt.hdr.dst_id = neighbor_id;
+    lsaPkt.hdr.dst_id = dstID;
     lsaPkt.hdr.src_id = My_ID;
     lsaPkt.hdr.type = CTRL_LSA;
 
-    neighbor = get_node_from_id(&Node_List, neighbor_id);
+    neighbor = get_node_from_id(&Node_List, dstID);
 
     if (firstSend == 1) {
         lsaPkt.hdr.src_id = My_ID;
         lsaPkt.updateNum = update;
+
         for (int i = 0; i < MAX_NODES; i++)
         {
             lsaPkt.updateRow[i] = edges[My_ID][i];
-            if (fwdingTable[i]== neighbor_id)
+            if (fwdingTable[i]== dstID)
             {
                 lsaPkt.updateRow[i] = edges[My_ID][i];
             }
         }
     } else {
         lsaPkt.hdr.src_id = src;
-        lsaPkt.updateNum = messageUpdNum;
+        lsaPkt.updateNum = messageUpdateNum;
+
         for (int i = 0; i < MAX_NODES; i++)
         {
             lsaPkt.updateRow[i] = updates[i];
-            if (fwdingTable[i] == neighbor_id)
+            if (fwdingTable[i] == dstID)
             {
                 lsaPkt.updateRow[i] = updates[i];
             }
